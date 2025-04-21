@@ -3,105 +3,89 @@
 USER_NAME=$(whoami)
 USER_HOME=$(eval echo ~$USER_NAME)
 
-
 echo "Current directory: $(pwd)"
+
+# Since you're running from src and ComfyUI is inside src
 script_dir=$(dirname "$(realpath "$0")")
-echo "script_dir : $script_dir"
-parent_dir=$(dirname "$script_dir")
-echo "parent_dir Directory: $parent_dir"
-parentparent_dir=$(dirname "$parent_dir")
-echo "parentparent_dir Directory: $parentparent_dir"
-comfy_ui_dir="$parentparent_dir/ComfyUI"
-echo "ComfyUI Directory: $comfy_ui_dir"
+comfy_ui_dir="$script_dir/ComfyUI"
+
+echo "Script directory: $script_dir"
+echo "ComfyUI directory: $comfy_ui_dir"
 
 PYTHON_PATH="${USER_HOME}/miniconda3/bin/python"
 BASHRC_PATH="${USER_HOME}/.bashrc"
 COMFYUI_RUNNER_PATH="${comfy_ui_dir}/main.py"
-COMFYUI_PATH=$comfy_ui_dir
 
+# Step 1: Install ComfyUI
+chmod +x "$script_dir/install_comfyui.sh"
+"$script_dir/install_comfyui.sh"
 
-cp comfyui-on-cloud/src/install_comfyui.sh .
+echo -e "\n ---------------- ComfyUI installed \n"
 
-chmod +x install_comfyui.sh
-./install_comfyui.sh
+# Step 2: Copy automation scripts into ComfyUI directory
+cp "$script_dir/install_extensions.sh" "$comfy_ui_dir/"
+cp "$script_dir/install_checkpoints.sh" "$comfy_ui_dir/"
 
-echo " "
-echo " ---------------- comfyui installed "
-echo " "
+echo -e "\n ---------------- Automation scripts copied to ComfyUI directory \n"
 
-cp comfyui-on-cloud/src/install_extensions.sh ComfyUI
-cp comfyui-on-cloud/src/install_checkpoints.sh ComfyUI
-
-echo " "
-echo " ---------------- automation scripts copied to comfyui directory "
-echo " "
-
-cd ComfyUI
+# Step 3: Install extensions and checkpoints
+cd "$comfy_ui_dir" || { echo "ComfyUI directory not found!"; exit 1; }
 
 chmod +x install_extensions.sh
 chmod +x install_checkpoints.sh
 ./install_extensions.sh
 
-echo " "
-echo " ---------------- extensions installed "
-echo " "
+echo -e "\n ---------------- Extensions installed \n"
+
 ./install_checkpoints.sh
-#./install_checkpoints_big.sh
+# Uncomment below if needed
+# ./install_checkpoints_big.sh
 
-echo " "
-echo " ---------------- checkpoints installed "
-echo " "
+echo -e "\n ---------------- Checkpoints installed \n"
 
+# Step 4: Create run_the_server.sh
+cat <<EOF > run_the_server.sh
+#!/bin/bash
 
-# Dynamically creating run_the_server.sh
+BASHRC_PATH="$BASHRC_PATH"
+PYTHON_PATH="$PYTHON_PATH"
+COMFYUI_RUNNER_PATH="$COMFYUI_RUNNER_PATH"
 
-# Create the run_the_server.sh file
-echo "#!/bin/bash" > run_the_server.sh
-echo "" >> run_the_server.sh
-echo "BASHRC_PATH=\"$BASHRC_PATH\"" >> run_the_server.sh
-echo "PYTHON_PATH=\"$PYTHON_PATH\"" >> run_the_server.sh
-echo "COMFYUI_RUNNER_PATH=\"${COMFYUI_PATH}/main.py\"" >> run_the_server.sh
-echo "" >> run_the_server.sh
-echo "# Source the bashrc file" >> run_the_server.sh
-echo "source \$BASHRC_PATH" >> run_the_server.sh
-echo "" >> run_the_server.sh
-echo "# Start ComfyUI using the defined paths" >> run_the_server.sh
-echo "if ! sudo -u $USER_NAME \$PYTHON_PATH \$COMFYUI_RUNNER_PATH --listen; then" >> run_the_server.sh
-echo "    echo \"Error: Failed to start ComfyUI\" >&2" >> run_the_server.sh
-echo "fi" >> run_the_server.sh
+# Source the bashrc file
+source \$BASHRC_PATH
 
-# Make the script executable
+# Start ComfyUI
+if ! sudo -u $USER_NAME \$PYTHON_PATH \$COMFYUI_RUNNER_PATH --listen; then
+    echo "Error: Failed to start ComfyUI" >&2
+fi
+EOF
+
 chmod +x run_the_server.sh
-cp run_the_server.sh ComfyUI
 
-echo " "
-echo " ---------------- custom run_the_server.sh created "
-echo " "
+echo -e "\n ---------------- custom run_the_server.sh created \n"
 
-
-
+# Step 5: Setup systemd service
 SERVICE_FILE_CONTENT="[Unit]
 Description=ComfyUI Server
 
 [Service]
 Type=simple
 ExecStart=${comfy_ui_dir}/run_the_server.sh
-
-
+Restart=always
+User=$USER_NAME
+WorkingDirectory=$comfy_ui_dir
 
 [Install]
 WantedBy=multi-user.target"
 
-# Create the systemd service file
 echo "$SERVICE_FILE_CONTENT" | sudo tee /etc/systemd/system/comfyui.service > /dev/null
 
-# Reload systemd to recognize the new service
 sudo systemctl daemon-reload
 sudo systemctl enable comfyui.service
 sudo systemctl start comfyui.service
 
-echo " "
-echo " ---------------- setup completed "
-echo " "
-echo -e " ---------------- For health check go to this address $(curl -s httpbin.org/ip | jq -r .origin):8188 in your browser"
+echo -e "\n ---------------- setup completed \n"
 
+# Optional health check
+IP_ADDRESS=$(curl -s httpbin.org/ip | jq -r .origin)
+echo -e " ---------------- For health check go to: http://$IP_ADDRESS:8188 in your browser"
